@@ -43,7 +43,20 @@ auto JsonParser::FromFile(const score::cpp::string_view file_path) const noexcep
 
 auto JsonParser::FromBuffer(const score::cpp::string_view buffer) const noexcept -> score::Result<Any>
 {
+// Concrete Parser implementation is determined via a link seam. The implementations names differ, thus we have to use
+// the preprocessor here to select the correct one.
+// coverity[autosar_cpp14_a16_0_1_violation]
+#ifdef VAJSON
+    return VajsonParser::FromBuffer(buffer);
+// Concrete Parser implementation is determined via a link seam. The implementations names differ, thus we have to use
+// the preprocessor here to select the correct one.
+// coverity[autosar_cpp14_a16_0_1_violation]
+#else
     return NlohmannParser::FromBuffer(buffer);
+// Concrete Parser implementation is determined via a link seam. The implementations names differ, thus we have to use
+// the preprocessor here to select the correct one.
+// coverity[autosar_cpp14_a16_0_1_violation]
+#endif
 }
 
 // False positive, user defined literal operator is used to perform conversion.
