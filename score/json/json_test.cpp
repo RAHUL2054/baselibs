@@ -14,7 +14,7 @@
 #include "score/json/json_parser.h"
 #include "score/json/json_writer.h"
 
-TEST(JsonTest, ReadWrite) //dummy changes
+TEST(JsonTest, ReadWrite)
 {
     RecordProperty("Verifies", "SCR-5310867");
     RecordProperty("ASIL", "B");
