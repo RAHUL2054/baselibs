@@ -13,6 +13,8 @@
 #include "score/memory/shared/shared_memory_test_resources.h"
 
 #include "fake/my_memory_resource.h"
+#include "score/memory/shared/atomic_indirector.h"
+#include "score/memory/shared/atomic_mock.h"
 #include "score/memory/shared/pointer_arithmetic_util.h"
 
 #include "score/hash.hpp"
@@ -27,6 +29,7 @@ namespace score::memory::shared::test
 {
 
 using ::testing::_;
+using ::testing::AtLeast;
 using ::testing::AtMost;
 using ::testing::InSequence;
 using ::testing::Return;
@@ -338,6 +341,88 @@ TEST_F(SharedMemoryResourceAllocateDeathTest, AllocatingMultipleBlocksLargerThan
     // Then the program terminates
     ManagedMemoryResourceTestAttorney attorney2(*resource);
     EXPECT_DEATH(attorney2.getMemoryResourceProxy()->allocate(remaining_memory + 1), ".*");
+}
+
+class SharedMemoryResourceAllocateAtomicMockTest : public SharedMemoryResourceAllocateTest
+{
+  protected:
+    void SetUp() override
+    {
+        SharedMemoryResourceAllocateTest::SetUp();
+        atomic_mock_ = std::make_unique<AtomicMock<std::size_t>>();
+        AtomicIndirectorReal<std::size_t>::SetMockObject(atomic_mock_.get());
+    }
+
+    void TearDown() override
+    {
+        AtomicIndirectorReal<std::size_t>::SetMockObject(nullptr);
+        atomic_mock_.reset();
+        SharedMemoryResourceAllocateTest::TearDown();
+    }
+
+    std::unique_ptr<AtomicMock<std::size_t>> atomic_mock_;
+};
+
+TEST_F(SharedMemoryResourceAllocateAtomicMockTest, AllocationRetriesOnCasFailureThenSucceeds)
+{
+    constexpr std::int32_t file_descriptor = 5;
+    constexpr bool is_read_write = true;
+
+    alignas(std::max_align_t) std::array<std::uint8_t, 300U> dataRegion{};
+    auto id = score::cpp::hash_bytes(TestValues::sharedMemorySegmentPath, strlen(TestValues::sharedMemorySegmentPath));
+    auto* const control_block_addr = new (dataRegion.data()) ControlBlock(id);
+    control_block_addr->alreadyAllocatedBytes = sizeof(ControlBlock);
+
+    expectSharedMemorySuccessfullyOpened(file_descriptor, is_read_write, dataRegion.data());
+
+    EXPECT_CALL(*atomic_mock_, load(_))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(sizeof(ControlBlock)));
+    EXPECT_CALL(*atomic_mock_, compare_exchange_weak(_, _, _, _))
+        .Times(2)
+        .WillOnce(Return(false))
+        .WillOnce(Return(true));
+
+    auto resource_result = SharedMemoryResourceTestAttorney::Open(TestValues::sharedMemorySegmentPath, is_read_write);
+    ASSERT_TRUE(resource_result.has_value());
+    auto resource = resource_result.value();
+
+    ManagedMemoryResourceTestAttorney attorney(*resource);
+    EXPECT_NE(attorney.getMemoryResourceProxy()->allocate(8U), nullptr);
+}
+
+using SharedMemoryResourceAllocateAtomicMockDeathTest = SharedMemoryResourceAllocateAtomicMockTest;
+
+TEST_F(SharedMemoryResourceAllocateAtomicMockDeathTest, TerminatesAfterMaxRetriesWhenCasAlwaysFails)
+{
+    constexpr std::int32_t file_descriptor = 5;
+    constexpr bool is_read_write = true;
+    constexpr bool is_death_test = true;
+
+    alignas(std::max_align_t) std::array<std::uint8_t, 300U> dataRegion{};
+    auto id = score::cpp::hash_bytes(TestValues::sharedMemorySegmentPath, strlen(TestValues::sharedMemorySegmentPath));
+    auto* const control_block_addr = new (dataRegion.data()) ControlBlock(id);
+    control_block_addr->alreadyAllocatedBytes = sizeof(ControlBlock);
+
+    constexpr std::int32_t lock_file_descriptor = 10;
+    expectCreateLockFileReturns(TestValues::sharedMemorySegmentLockPath, lock_file_descriptor);
+    expectShmOpenReturns(TestValues::sharedMemorySegmentPath, file_descriptor, is_read_write, is_death_test);
+    expectFstatReturns(file_descriptor);
+    expectMmapReturns(dataRegion.data(), file_descriptor, is_read_write, is_death_test);
+    EXPECT_CALL(*unistd_mock_, close(lock_file_descriptor));
+    EXPECT_CALL(*unistd_mock_, unlink(StrEq(TestValues::sharedMemorySegmentLockPath)));
+    EXPECT_CALL(*mman_mock_, munmap(_, _));
+    EXPECT_CALL(*unistd_mock_, close(file_descriptor));
+
+    ON_CALL(*atomic_mock_, load(_)).WillByDefault(Return(sizeof(ControlBlock)));
+    ON_CALL(*atomic_mock_, compare_exchange_weak(_, _, _, _)).WillByDefault(Return(false));
+
+    auto resource_result = SharedMemoryResourceTestAttorney::Open(TestValues::sharedMemorySegmentPath, is_read_write);
+    ASSERT_TRUE(resource_result.has_value());
+    auto resource = resource_result.value();
+
+    ManagedMemoryResourceTestAttorney attorney(*resource);
+    EXPECT_DEATH(attorney.getMemoryResourceProxy()->allocate(8U), ".*");
 }
 
 }  // namespace score::memory::shared::test

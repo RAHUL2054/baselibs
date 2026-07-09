@@ -12,6 +12,7 @@
  ********************************************************************************/
 #include "score/memory/shared/shared_memory_resource.h"
 #include "score/language/safecpp/string_view/zstring_view.h"
+#include "score/memory/shared/atomic_indirector.h"
 #include "score/memory/shared/memory_resource_proxy.h"
 #include "score/memory/shared/memory_resource_registry.h"
 #include "score/memory/shared/pointer_arithmetic_util.h"
@@ -708,7 +709,8 @@ auto SharedMemoryResource::do_allocate(const std::size_t bytes, const std::size_
     void* const allocation_end_address = AddOffsetToPointer(this->base_address_, virtual_address_space_to_reserve_);
 
     std::size_t already_allocated_bytes =
-        this->control_block_->alreadyAllocatedBytes.load(std::memory_order_acquire);
+        AtomicIndirectorReal<std::size_t>::load(this->control_block_->alreadyAllocatedBytes,
+                                                  std::memory_order_acquire);
 
     for (std::size_t retry_count = 0U; retry_count < max_retries; ++retry_count)
     {
@@ -756,7 +758,8 @@ auto SharedMemoryResource::do_allocate(const std::size_t bytes, const std::size_
         // Atomically publish the advanced bump pointer. If another allocator updated the
         // bump pointer first, compare_exchange_weak updates already_allocated_bytes with the
         // latest value and the next loop iteration recalculates the allocation.
-        if (this->control_block_->alreadyAllocatedBytes.compare_exchange_weak(
+        if (AtomicIndirectorReal<std::size_t>::compare_exchange_weak(
+                this->control_block_->alreadyAllocatedBytes,
                 already_allocated_bytes,
                 new_already_allocated_bytes,
                 std::memory_order_acq_rel,

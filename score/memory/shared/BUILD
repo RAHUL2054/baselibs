@@ -785,6 +785,7 @@ cc_gtest_unit_test(
         "@score_baselibs//score/memory:__pkg__",
     ],
     deps = [
+        ":atomic_indirector_mock_binding",
         ":pointer_arithmetic_util",
         ":shared_memory_test_resources",
         "@score_baselibs//score/memory/shared/fake:fake_memory_resources",

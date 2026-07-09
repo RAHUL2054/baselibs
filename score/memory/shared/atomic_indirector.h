@@ -62,9 +62,24 @@ class AtomicIndirectorReal
     // its required in production code.
     static constexpr bool is_always_lock_free = std::atomic<T>::is_always_lock_free;
 
+    static void SetMockObject(IAtomic<T>* const mock_object)
+    {
+        mock_object_ = mock_object;
+    }
+
+    static IAtomic<T>* GetMockObject()
+    {
+        return mock_object_;
+    }
+
     template <typename... Args>
     static T fetch_add(std::atomic<T>& value, Args&&... args) noexcept
     {
+        if (mock_object_ != nullptr)
+        {
+            return mock_object_->fetch_add(std::forward<Args>(args)...);
+        }
+
         // Suppress "AUTOSAR C++14 M5-0-3" rule findings. This rule states: "A cvalue expression shall
         // not be implicitly converted to a different underlying type"
         // Rationale: There is no implicit conversion. std::atomic<T>::fetch_add returns type T, which is what we return
@@ -76,6 +91,11 @@ class AtomicIndirectorReal
     template <typename... Args>
     static T fetch_sub(std::atomic<T>& value, Args&&... args) noexcept
     {
+        if (mock_object_ != nullptr)
+        {
+            return mock_object_->fetch_sub(std::forward<Args>(args)...);
+        }
+
         // Suppress "AUTOSAR C++14 M5-0-3" rule findings. This rule states: "A cvalue expression shall
         // not be implicitly converted to a different underlying type"
         // Rationale: There is no implicit conversion. std::atomic<T>::fetch_sub returns type T, which is what we return
@@ -87,27 +107,54 @@ class AtomicIndirectorReal
     template <typename... Args>
     static bool compare_exchange_strong(std::atomic<T>& value, Args&&... args) noexcept
     {
+        if (mock_object_ != nullptr)
+        {
+            return mock_object_->compare_exchange_strong(std::forward<Args>(args)...);
+        }
+
         return value.compare_exchange_strong(std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     static bool compare_exchange_weak(std::atomic<T>& value, Args&&... args) noexcept
     {
+        if (mock_object_ != nullptr)
+        {
+            return mock_object_->compare_exchange_weak(std::forward<Args>(args)...);
+        }
+
         return value.compare_exchange_weak(std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     static void store(std::atomic<T>& value, Args&&... args) noexcept
     {
+        if (mock_object_ != nullptr)
+        {
+            mock_object_->store(std::forward<Args>(args)...);
+            return;
+        }
+
         value.store(std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     static auto load(const std::atomic<T>& value, Args&&... args) noexcept -> auto
     {
+        if (mock_object_ != nullptr)
+        {
+            return mock_object_->load(std::forward<Args>(args)...);
+        }
+
         return value.load(std::forward<Args>(args)...);
     }
+
+  private:
+    static IAtomic<T>* mock_object_;
 };
+
+template <typename T>
+IAtomic<T>* AtomicIndirectorReal<T>::mock_object_{nullptr};
 
 template <typename T>
 class AtomicIndirectorMock
